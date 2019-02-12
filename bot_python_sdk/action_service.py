@@ -28,15 +28,15 @@ class ActionService:
 
     def get_actions(self):
         Logger.info(LOCATION, 'Retrieving actions...')
-        try:
-            actions = self.bot_service.get(ACTIONS_ENDPOINT)
-            Logger.success(LOCATION, 'Successfully retrieved ' + str(len(actions)) + ' action(s) from server')
-            Store.set_actions(actions)
-            return actions
-        except falcon.HTTPServiceUnavailable:
+        actions = self.bot_service.get(ACTIONS_ENDPOINT)
+        if actions is None or not actions:
             Logger.warning(LOCATION, 'Unable to retrieve actions from server. Loading locally stored action(s)...')
             actions = self.store.get_actions()
             Logger.success(LOCATION, 'Successfully loaded ' + str(len(actions)) + ' cached action(s)')
+            return actions
+        else:
+            Logger.success(LOCATION, 'Successfully retrieved ' + str(len(actions)) + ' action(s) from server')
+            Store.set_actions(actions)
             return actions
 
     def trigger(self, action_id, value=None):
