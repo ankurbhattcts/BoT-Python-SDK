@@ -22,33 +22,53 @@ METHOD_POST = 'POST'
 ACTIONS_ENDPOINT = '/actions'
 PAIRING_ENDPOINT = '/pairing'
 
+""" Error Text """
+ERROR_TRIGGER = 'Not allowed to trigger actions when device is not activated.'
+ERROR_PAIRED = 'Device is already paired.'
+ERROR_ACTION_ID = 'Missing parameter `' + ACTION_ID + '` for ' + METHOD_POST + ' ' + ACTIONS_ENDPOINT
 
-class ActionsResource:
+
+class BaseUtilHandler:
     def __init__(self):
-        self.action_service = ActionService()
         self.configuration_store = ConfigurationStore()
 
+    @staticmethod
+    def call_error_logger(error, has_desc):
+        Logger.error(LOCATION, error)
+        if has_desc:
+            raise falcon.HTTPForbidden(description=error)
+        else:
+            raise falcon.HTTPBadRequest
+
+    @staticmethod
+    def call_info_logger(call_type, endpoint):
+        Logger.info(LOCATION, INCOMING_REQUEST + call_type + ' ' + endpoint)
+
+    def check_device_status(self, config_status, expected_status, pair):
+        if config_status is not expected_status:
+            self.call_error_logger(ERROR_PAIRED, True) if pair else self.call_error_logger(ERROR_TRIGGER, True)
+
+
+class ActionsResource(BaseUtilHandler):
+    def __init__(self):
+        self.action_service = ActionService()
+        super().__init__(self)
+
     def on_get(self, request, response):
-        Logger.info(LOCATION, INCOMING_REQUEST + METHOD_GET + ' ' + ACTIONS_ENDPOINT)
+        self.call_info_logger(METHOD_GET, ACTIONS_ENDPOINT)
         response.media = self.action_service.get_actions()
 
     def on_post(self, request, response):
         configuration = self.configuration_store.get()
+        self.check_device_status(configuration.get_device_status(), DeviceStatus.ACTIVE, False)
+        self.call_info_logger(METHOD_POST, ACTIONS_ENDPOINT)
 
-        if configuration.get_device_status() is not DeviceStatus.ACTIVE:
-            error = 'Not allowed to trigger actions when device is not activated.'
-            Logger.error(LOCATION, error)
-            raise falcon.HTTPForbidden(description=error)
-
-        Logger.info(LOCATION, INCOMING_REQUEST + METHOD_POST + ' ' + ACTIONS_ENDPOINT)
         data = request.media
         if ACTION_ID not in data.keys():
-            Logger.error(LOCATION, 'Missing parameter `' + ACTION_ID + '` for ' + METHOD_POST + ' ' + ACTIONS_ENDPOINT)
-            raise falcon.HTTPBadRequest
+            self.call_error_logger(ERROR_ACTION_ID, False)
 
         action_id = data[ACTION_ID]
         value = data[VALUE_KEY] if VALUE_KEY in data.keys() else None
-
         success = self.action_service.trigger(action_id, value)
         if success:
             response.media = {'message': 'Action triggered'}
@@ -56,17 +76,12 @@ class ActionsResource:
             raise falcon.HTTPServiceUnavailable
 
 
-class PairingResource:
-    def __init__(self):
-        self.configuration_store = ConfigurationStore()
+class PairingResource(BaseUtilHandler):
 
     def on_get(self, request, response):
-        Logger.info(LOCATION, INCOMING_REQUEST + METHOD_GET + ' ' + PAIRING_ENDPOINT)
+        self.call_info_logger(METHOD_GET, PAIRING_ENDPOINT)
         configuration = self.configuration_store.get()
-        if configuration.get_device_status() is not DeviceStatus.NEW:
-            error = 'Device is already paired.'
-            Logger.error(LOCATION, error)
-            raise falcon.HTTPForbidden(description=error)
+        self.check_device_status(configuration.get_device_status(), DeviceStatus.NEW, True)
         response.media = configuration.get_device_information
         subprocess.Popen(['make', 'pair'])
 
